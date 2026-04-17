@@ -1,46 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { createClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
 
-async function getBusinessId(): Promise<string | null> {
-  const cookieStore = cookies()
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { global: { headers: { Cookie: cookieStore.toString() } } }
-  )
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
-  const { data: business } = await supabaseAdmin
-    .from('businesses')
-    .select('id')
-    .eq('user_id', user.id)
-    .single()
-  return business?.id ?? null
-}
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+  const body = await req.json()
+  const { status, customer_name, delivery_address, quantity, notes } = body
 
-// GET /api/orders — fetch all orders for authenticated business
-export async function GET(req: NextRequest) {
-  const businessId = await getBusinessId()
-  if (!businessId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const validStatuses = ['pending', 'confirmed', 'delivered']
+  if (status && !validStatuses.includes(status)) {
+    return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
   }
 
-  const { searchParams } = new URL(req.url)
-  const status = searchParams.get('status')
-  const limit  = parseInt(searchParams.get('limit') ?? '50')
-
-  let query = supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('orders')
-    .select('*')
-    .eq('business_id', businessId)
-    .order('created_at', { ascending: false })
-    .limit(limit)
+    .update({
+      ...(status           && { status }),
+      ...(customer_name    && { customer_name }),
+      ...(delivery_address && { delivery_address }),
+      ...(quantity         && { quantity: parseInt(quantity) }),
+      ...(notes            && { notes }),
+    })
+    .eq('id', id)
+    .select()
+    .single()
 
-  if (status) query = query.eq('status', status)
-
-  const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data)
 }
